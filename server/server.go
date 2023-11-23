@@ -11,8 +11,8 @@ import (
 
 type client struct {
 	conn   net.Conn
-	writer *bufio.Writer
-	reader *bufio.Reader
+	writer bufio.Writer
+	reader bufio.Reader
 }
 
 type tcpChatServer struct {
@@ -54,35 +54,35 @@ func (s *tcpChatServer) Start() {
 }
 
 func (s *tcpChatServer) Broadcast(message string) error {
-	for _, client := range s.clients {
+	for client, _ := range s.clients {
 		client.writer.WriteString(message)
 	}
 	return nil
 }
 
 func (s *tcpChatServer) Message(name string, message string) error {
-	for _, client := range s.clients {
-		if client.name == name {
+	for client, nickname := range s.clients {
+		if nickname == name {
 			client.writer.WriteString(message)
 		}
 	}
 	return nil
 }
 
-func (s *tcpChatServer) Nickname(name string) bool {
-	for _, client := range s.clients {
-		if client.name == name {
+func (s *tcpChatServer) Nickname(client *client, name string) bool {
+	for _, nickname := range s.clients {
+		if nickname == name {
 			return false
 		}
 	}
-	s.clients = append(s.clients)
+	s.clients[client] = name
 	return true
 }
 
 func (s *tcpChatServer) List() []string {
 	var names []string
-	for _, client := range s.clients {
-		names = append(names, client.name)
+	for _, name := range s.clients {
+		names = append(names, name)
 	}
 	return names
 }
@@ -102,8 +102,8 @@ func (s *tcpChatServer) accept(conn net.Conn) *client {
 func (s *tcpChatServer) remove(client *client) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	for i, check := range s.clients {
-		if check == client {
+	for c, nickname := range s.clients {
+		if client == c {
 			s.clients = append(s.clients[:i], s.clients[i+1:]...)
 		}
 	}

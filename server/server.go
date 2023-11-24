@@ -107,8 +107,11 @@ func (s *TcpChatServer) remove(client *client) {
 	client.conn.Close()
 }
 
-func (s *TcpChatServer) serve(client *client) {
+func invalidCommand(client *client) {
+	client.conn.Write([]byte("Invalid command\n"))
+}
 
+func (s *TcpChatServer) serve(client *client) {
 	defer s.remove(client)
 	for {
 		buffer := make([]byte, 128)
@@ -120,13 +123,28 @@ func (s *TcpChatServer) serve(client *client) {
 		message := string(buffer[:n])
 		message = strings.TrimSpace(message)
 		parts := strings.SplitN(message, " ", 2)
-		if len(parts) != 2 {
-			client.conn.Write([]byte("Invalid Message format: " + message + "\n"))
-			continue
-		}
 		command := parts[0]
-		content := parts[1]
+		switch len(parts) {
+		case 1:
+			if command != "/LIST" {
+				invalidCommand(client)
+			}
+			break
+		case 2:
+			if command != "/NICK" || command != "BC" {
+				invalidCommand(client)
+			} else {
+				param := parts[1]
+				switch
+			}
+			break
+		case 3:
+			if command != "MSG" {
+				invalidCommand(client)
+			}
+		default:
 
+		}
 		switch command {
 		case "/BC":
 			go s.Broadcast(content)

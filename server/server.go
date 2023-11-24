@@ -1,8 +1,7 @@
 package server
 
 import (
-	"bufio"
-	"io"
+	"fmt"
 	"log"
 	"net"
 	"strings"
@@ -10,25 +9,23 @@ import (
 )
 
 type client struct {
-	conn   net.Conn
-	writer bufio.Writer
-	reader bufio.Reader
+	conn net.Conn
 }
 
-type tcpChatServer struct {
+type TcpChatServer struct {
 	listener net.Listener
 	clients  map[*client]string
 	mutex    *sync.Mutex
 }
 
-func NewTcpChatServer() *tcpChatServer {
-	return &tcpChatServer{
+func NewTcpChatServer() *TcpChatServer {
+	return &TcpChatServer{
 		clients: make(map[*client]string),
 		mutex:   &sync.Mutex{},
 	}
 }
 
-func (s *tcpChatServer) Listen(address string) error {
+func (s *TcpChatServer) Listen(address string) error {
 	l, err := net.Listen("tcp", address)
 	if err == nil {
 		s.listener = l
@@ -37,11 +34,11 @@ func (s *tcpChatServer) Listen(address string) error {
 	return err
 }
 
-func (s *tcpChatServer) Close() {
+func (s *TcpChatServer) Close() {
 	s.listener.Close()
 }
 
-func (s *tcpChatServer) Start() {
+func (s *TcpChatServer) Start() {
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
@@ -53,23 +50,23 @@ func (s *tcpChatServer) Start() {
 	}
 }
 
-func (s *tcpChatServer) Broadcast(message string) error {
+func (s *TcpChatServer) Broadcast(message string) error {
 	for client, _ := range s.clients {
-		client.writer.WriteString(message)
+		client.conn.Write([]byte(message))
 	}
 	return nil
 }
 
-func (s *tcpChatServer) Message(name string, message string) error {
+func (s *TcpChatServer) Message(name string, message string) error {
 	for client, nickname := range s.clients {
 		if nickname == name {
-			client.writer.WriteString(message)
+			client.conn.Write([]byte(message))
 		}
 	}
 	return nil
 }
 
-func (s *tcpChatServer) Nickname(client *client, name string) bool {
+func (s *TcpChatServer) Nickname(client *client, name string) bool {
 	for _, nickname := range s.clients {
 		if nickname == name {
 			return false
@@ -79,7 +76,7 @@ func (s *tcpChatServer) Nickname(client *client, name string) bool {
 	return true
 }
 
-func (s *tcpChatServer) List() []string {
+func (s *TcpChatServer) List() []string {
 	var names []string
 	for _, name := range s.clients {
 		names = append(names, name)
@@ -87,66 +84,57 @@ func (s *tcpChatServer) List() []string {
 	return names
 }
 
-func (s *tcpChatServer) accept(conn net.Conn) *client {
+func (s *TcpChatServer) accept(conn net.Conn) *client {
 	log.Printf("Accepting connection from %v, total clients %v", conn.RemoteAddr().String(), len(s.clients))
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	client := &client{
-		conn:   conn,
-		writer: *bufio.NewWriter(conn),
-		reader: *bufio.NewReader(conn),
+		conn: conn,
 	}
 	return client
 }
 
-func (s *tcpChatServer) remove(client *client) {
+func (s *TcpChatServer) remove(client *client) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	for c, nickname := range s.clients {
+	for c, _ := range s.clients {
 		if client == c {
-			s.clients = append(s.clients[:i], s.clients[i+1:]...)
+			delete(s.clients, c)
+			break
 		}
 	}
 	log.Printf("Closing connection from %v, total clients %v", client.conn.RemoteAddr().String())
 	client.conn.Close()
 }
 
-func (s *tcpChatServer) serve(client *client) {
+func (s *TcpChatServer) serve(client *client) {
 
-	client.reader = bufio.Reader(client.conn)
-	client.writer = bufio.Writer(client.conn)
 	defer s.remove(client)
 	for {
-		message, error := client.reader.Read()
-		if error != nil && error != io.EOF {
-			log.Printf("Read Error %v", err)
+		buffer := make([]byte, 128)
+		n, err := client.conn.Read(buffer)
+		if err != nil {
+			fmt.Println("Error reading:", err)
+			return
 		}
-		if message != nil {
-			message = strings.TrimSpace(message)
-			parts := strings.SplitN(message, " ", 2)
-			if len(parts) != 2 {
-				client.writer.write("Invalid Message format %s\n", message)
-				continue
-			}
-			command := parts[0]
-			content := parts[1]
+		message := string(buffer[:n])
+		message = strings.TrimSpace(message)
+		parts := strings.SplitN(message, " ", 2)
+		if len(parts) != 2 {
+			client.conn.Write([]byte("Invalid Message format: " + message + "\n"))
+			continue
+		}
+		command := parts[0]
+		content := parts[1]
 
-			switch command {
-			case "/BC":
-				go s.Broadcast(content)
-			case "/MSG":
-				go s.Message(content)
-			case "/NICK":
-				go s.Nickname(content)
-			default:
-
-			}
+		switch command {
+		case "/BC":
+			go s.Broadcast(content)
+		case "/MSG":
+			go s.Message(content)
+		case "/NICK":
+			go s.Nickname(content)
+		default:
 		}
 	}
-}
-func main() {
-	var s server.ChatServer
-	s = server.NewServer()
-	s.Listen(":3333")
-	s.Start()
 }

@@ -6,6 +6,6 @@ func main() {
 
 	var s server.TcpChatServer
 	s = *server.NewTcpChatServer()
-	s.Listen(":3333")
+	s.Listen(":6666")
 	s.Start()
 }

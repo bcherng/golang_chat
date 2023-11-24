@@ -50,17 +50,52 @@ func (s *TcpChatServer) Start() {
 	}
 }
 
-func (s *TcpChatServer) Broadcast(message string) error {
-	for client, _ := range s.clients {
-		client.conn.Write([]byte(message))
+func (s *TcpChatServer) Broadcast(client *client, message string) error {
+	registered := false
+	nickname := ""
+	for c, n := range s.clients {
+		if client == c {
+			registered = true
+			nickname = n
+			break
+		}
+	}
+	if registered != true {
+		client.conn.Write([]byte("Register first!\n"))
+	} else {
+		client.conn.Write([]byte("Broadcasting: " + message + "\n"))
+		for c := range s.clients {
+			if c != client {
+				c.conn.Write([]byte(nickname + ": " + message + "\n"))
+			}
+		}
 	}
 	return nil
 }
 
-func (s *TcpChatServer) Message(name string, message string) error {
-	for client, nickname := range s.clients {
-		if nickname == name {
-			client.conn.Write([]byte(message))
+func (s *TcpChatServer) Message(client *client, name string, message string) error {
+	registered := false
+	nickname := ""
+	for c, n := range s.clients {
+		if client == c {
+			if name == n {
+				client.conn.Write([]byte("Cannot message yourself!\n"))
+				return nil
+			} else {
+				registered = true
+				nickname = n
+				break
+			}
+		}
+	}
+	if registered != true {
+		client.conn.Write([]byte("Register first!\n"))
+	} else {
+		for c, n := range s.clients {
+			if n == name {
+				client.conn.Write([]byte("Messaging " + name + ": " + message + "\n"))
+				c.conn.Write([]byte(nickname + ": " + message + "\n"))
+			}
 		}
 	}
 	return nil
@@ -68,42 +103,55 @@ func (s *TcpChatServer) Message(name string, message string) error {
 
 func (s *TcpChatServer) Nickname(client *client, name string) bool {
 	for _, nickname := range s.clients {
-		if nickname == name {
+		if name == "server" || nickname == name {
+			client.conn.Write([]byte("Name is taken!\n"))
 			return false
 		}
 	}
+	for c := range s.clients {
+		if c != client {
+			c.conn.Write([]byte("server: User " + name + " has logged on\n"))
+		}
+	}
+
 	s.clients[client] = name
+	client.conn.Write([]byte("Registered nickname " + name + "\n"))
 	return true
 }
 
-func (s *TcpChatServer) List() []string {
-	var names []string
+func (s *TcpChatServer) List(client *client) {
 	for _, name := range s.clients {
-		names = append(names, name)
+		client.conn.Write([]byte(name + " "))
 	}
-	return names
+	client.conn.Write([]byte("\n"))
 }
 
 func (s *TcpChatServer) accept(conn net.Conn) *client {
-	log.Printf("Accepting connection from %v, total clients %v", conn.RemoteAddr().String(), len(s.clients))
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	client := &client{
 		conn: conn,
 	}
+	s.clients[client] = ""
+	log.Printf("Accepting connection from %v, total clients %v", conn.RemoteAddr().String(), len(s.clients))
 	return client
 }
 
 func (s *TcpChatServer) remove(client *client) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	for c, _ := range s.clients {
+	for c, n := range s.clients {
 		if client == c {
+			if n != "" {
+				for c := range s.clients {
+					c.conn.Write([]byte("server: User " + n + " has logged on\n"))
+				}
+			}
 			delete(s.clients, c)
 			break
 		}
 	}
-	log.Printf("Closing connection from %v, total clients %v", client.conn.RemoteAddr().String())
+	log.Printf("Closing connection from %v, total clients %v", client.conn.RemoteAddr().String(), len(s.clients))
 	client.conn.Close()
 }
 
@@ -126,33 +174,29 @@ func (s *TcpChatServer) serve(client *client) {
 		command := parts[0]
 		switch len(parts) {
 		case 1:
-			if command != "/LIST" {
+			if command == "/LIST" {
+				s.List(client)
+			} else {
 				invalidCommand(client)
 			}
 			break
 		case 2:
-			if command != "/NICK" || command != "BC" {
-				invalidCommand(client)
+			params := strings.SplitN(parts[1], " ", 2)
+			if command == "/NICK" && len(params) == 1 {
+				name := params[0]
+				s.Nickname(client, name)
+			} else if command == "/BC" {
+				message := params[0]
+				s.Broadcast(client, message)
+			} else if command == "/MSG" && len(params) == 2 {
+				target := params[0]
+				message := params[1]
+				s.Message(client, target, message)
 			} else {
-				param := parts[1]
-				switch
-			}
-			break
-		case 3:
-			if command != "MSG" {
 				invalidCommand(client)
 			}
 		default:
 
-		}
-		switch command {
-		case "/BC":
-			go s.Broadcast(content)
-		case "/MSG":
-			go s.Message(content)
-		case "/NICK":
-			go s.Nickname(content)
-		default:
 		}
 	}
 }
